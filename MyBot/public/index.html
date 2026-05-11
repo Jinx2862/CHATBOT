@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MAITRI Voice Chatbot — Maharashtra Investment Facilitation</title>
+  <meta name="description" content="Multilingual voice chatbot for MAITRI — Maharashtra Industry, Trade and Investment Facilitation Cell. Supports Marathi, Hindi, and English." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;600;700&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/voice-chat.css" />
+</head>
+<body>
+
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <header class="chat-header">
+    <div class="header-logo">🏛️</div>
+    <div class="header-text">
+      <h1>MAITRI Voice Assistant</h1>
+      <p>Maharashtra Industry, Trade &amp; Investment Facilitation</p>
+    </div>
+    <div class="header-status">
+      <span class="status-dot"></span>
+      <span>Online</span>
+    </div>
+  </header>
+
+  <!-- ── Language Selector ───────────────────────────────────── -->
+  <div class="lang-bar">
+    <label for="language-selector">🌐 Language:</label>
+    <select id="language-selector">
+      <option value="">🌐 Auto-detect language</option>
+      <option value="mr">Marathi</option>
+      <option value="hi">Hindi</option>
+      <option value="en">English</option>
+    </select>
+  </div>
+
+  <!-- ── Chat Messages ───────────────────────────────────────── -->
+  <div id="chat-messages">
+    <!-- Typing indicator (hidden by default) -->
+    <div id="typing-indicator" class="message bot" style="display: none;">
+      <div class="message-avatar">🏛️</div>
+      <div class="typing-dots">
+        <span></span><span></span><span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Input Area ──────────────────────────────────────────── -->
+  <div class="chat-input-area">
+    <!-- Text input row -->
+    <div class="text-input-row">
+      <input
+        type="text"
+        id="text-input"
+        placeholder="Type your question in any language..."
+        autocomplete="off"
+      />
+      <button id="send-text-btn" title="Send text message">➤</button>
+    </div>
+
+    <!-- Mic control row -->
+    <div class="mic-row">
+      <button class="mic-btn mic-idle" id="mic-btn">
+        <span id="mic-icon">🎙️</span>
+      </button>
+      <span id="mic-label" class="mic-label">Tap to speak</span>
+      <span id="mic-timer"></span>
+    </div>
+  </div>
+
+  <script src="/voice-chat.js"></script>
+</body>
+</html>

@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FAQ Chatbot – API Demo</title>
+  <style>
+    :root {
+      --bg: #0f0f12;
+      --surface: #1a1a1f;
+      --border: #2a2a32;
+      --text: #e8e8ed;
+      --muted: #888;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 1rem;
+      min-height: 100vh;
+    }
+    h1 { font-size: 1.5rem; margin: 0 0 1rem; }
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .tabs button {
+      padding: 0.5rem 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .tabs button.active { background: var(--accent); border-color: var(--accent); }
+    .tabs button:hover:not(.active) { background: #25252d; }
+    .panel { display: none; max-width: 640px; }
+    .panel.active { display: block; }
+    .panel h2 { font-size: 1rem; margin: 0 0 0.5rem; color: var(--muted); }
+    input, textarea, button[type="submit"] {
+      width: 100%;
+      padding: 0.6rem;
+      margin-bottom: 0.5rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+    }
+    textarea { min-height: 80px; resize: vertical; }
+    button[type="submit"], .btn {
+      background: var(--accent);
+      border: none;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    button[type="submit"]:hover, .btn:hover { background: var(--accent-hover); }
+    .chat-box {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      min-height: 200px;
+      max-height: 360px;
+      overflow-y: auto;
+      padding: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+    .chat-msg {
+      margin-bottom: 1rem;
+      max-width: 100%;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .chat-msg-label {
+      display: block;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 0.35rem;
+      padding: 0 0.1rem;
+    }
+    .chat-msg.user .chat-msg-label { color: #93c5fd; }
+    .chat-msg.assistant .chat-msg-label { color: var(--muted); }
+    .chat-msg.user {
+      text-align: right;
+      padding: 0.75rem 1rem;
+      background: rgba(99, 102, 241, 0.1);
+      border-left: 4px solid var(--accent);
+    }
+    .chat-msg.user .chat-msg-body { display: none; }
+    .chat-msg.user .chat-msg-text {
+      font-size: 0.95rem;
+      color: #93c5fd;
+      font-weight: 500;
+      line-height: 1.5;
+    }
+    .chat-msg.assistant {
+      text-align: left;
+      padding: 0.75rem 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+    }
+    .chat-msg.assistant .chat-msg-label { margin-bottom: 0.5rem; }
+    .chat-msg-body {
+      font-size: 0.95rem;
+      color: var(--text);
+      line-height: 1.55;
+    }
+    .chat-msg-body ul, .chat-msg-body ol { margin: 0.5rem 0 0.5rem 1.25rem; padding-left: 1rem; }
+    .chat-msg-body li { margin-bottom: 0.25rem; }
+    .chat-msg-body a { color: var(--accent); text-decoration: underline; }
+    .chat-msg-body a:hover { text-decoration: none; }
+    /* Thinking bubble while waiting for assistant reply */
+    .chat-msg.thinking {
+      text-align: left;
+      padding: 0.75rem 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+    }
+    .chat-msg.thinking .chat-msg-label { color: var(--muted); }
+    .chat-msg.thinking .chat-msg-body { display: none; }
+    .chat-thinking-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.2rem 0;
+    }
+    .chat-thinking-dots span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+      animation: chat-thinking-bounce 1.4s ease-in-out infinite both;
+    }
+    .chat-thinking-dots span:nth-child(1) { animation-delay: -0.32s; }
+    .chat-thinking-dots span:nth-child(2) { animation-delay: -0.16s; }
+    @keyframes chat-thinking-bounce {
+      0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+      40% { transform: scale(1); opacity: 1; }
+    }
+    .suggestions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+    .suggestions button {
+      padding: 0.4rem 0.75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .suggestions button:hover { border-color: var(--accent); color: var(--accent); }
+    .status { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; }
+    .error { color: #f87171; }
+    pre { background: var(--surface); padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>FAQ Chatbot – API Demo</h1>
+  <div class="tabs">
+    <button type="button" data-panel="chat">Chat</button>
+    <button type="button" data-panel="faq">FAQ</button>
+    <button type="button" data-panel="raw">Raw API</button>
+  </div>
+
+  <div id="panel-chat" class="panel active">
+    <h2>Chat</h2>
+    <div class="status" id="chat-status">Start a session to chat.</div>
+    <div class="chat-box" id="chat-box"></div>
+    <div class="suggestions" id="suggestions"></div>
+    <form id="chat-form">
+      <input type="text" id="chat-input" placeholder="Type your question..." autocomplete="off" />
+      <button type="submit">Send</button>
+    </form>
+  </div>
+
+  <div id="panel-faq" class="panel">
+    <h2>FAQ list</h2>
+    <div id="faq-list"></div>
+    <h2 style="margin-top: 1rem;">Add question</h2>
+    <form id="faq-add">
+      <input type="text" id="faq-question" placeholder="Question" required />
+      <textarea id="faq-answer" placeholder="Answer (markdown, links OK)" required></textarea>
+      <button type="submit">Add</button>
+    </form>
+  </div>
+
+  <div id="panel-raw" class="panel">
+    <h2>Raw API</h2>
+    <p>Base URL: <code id="base-url">/api</code></p>
+    <ul style="color: var(--muted); font-size: 0.9rem;">
+      <li>POST /api/chat/init { ip?, userId? } → session</li>
+      <li>POST /api/chat/end { sessionId }</li>
+      <li>POST /api/chat/message { sessionId, message } → { reply }</li>
+      <li>GET /api/chat/history/:sessionId → { messages }</li>
+      <li>GET /api/chat/suggest?limit=5 → { suggestions }</li>
+      <li>GET /api/faq → [ { id, question, answer }, ... ]</li>
+      <li>POST /api/faq { question, answer }</li>
+      <li>PUT /api/faq/:id { question?, answer? }</li>
+      <li>DELETE /api/faq/:id</li>
+    </ul>
+  </div>
+
+  <script>
+    const BASE = window.location.origin;
+    document.getElementById("base-url").textContent = BASE + "/api";
+
+    // Tabs
+    document.querySelectorAll(".tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+        btn.classList.add("active");
+        document.getElementById("panel-" + btn.dataset.panel).classList.add("active");
+      });
+    });
+
+    // Chat
+    let sessionId = null;
+    const chatBox = document.getElementById("chat-box");
+    const chatStatus = document.getElementById("chat-status");
+    const chatInput = document.getElementById("chat-input");
+    const chatForm = document.getElementById("chat-form");
+    const suggestionsEl = document.getElementById("suggestions");
+
+    function appendChat(role, text) {
+      const div = document.createElement("div");
+      div.className = "chat-msg " + role;
+      const label = document.createElement("span");
+      label.className = "chat-msg-label";
+      label.textContent = role === "user" ? "Your question" : "Answer";
+      div.appendChild(label);
+      if (role === "assistant") {
+        const body = document.createElement("div");
+        body.className = "chat-msg-body";
+        body.innerHTML = text;
+        div.appendChild(body);
+      } else {
+        const textEl = document.createElement("div");
+        textEl.className = "chat-msg-text";
+        textEl.textContent = text;
+        div.appendChild(textEl);
+      }
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function showThinkingBubble() {
+      const div = document.createElement("div");
+      div.className = "chat-msg thinking";
+      div.id = "chat-thinking";
+      const label = document.createElement("span");
+      label.className = "chat-msg-label";
+      label.textContent = "Answer";
+      div.appendChild(label);
+      const dots = document.createElement("div");
+      dots.className = "chat-thinking-dots";
+      dots.innerHTML = "<span></span><span></span><span></span>";
+      div.appendChild(dots);
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function removeThinkingBubble() {
+      const el = document.getElementById("chat-thinking");
+      if (el) el.remove();
+    }
+
+    async function ensureSession() {
+      if (sessionId) return;
+      const res = await fetch(BASE + "/api/chat/init", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: "demo-user" }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      sessionId = data.sessionId;
+      chatStatus.textContent = "Session: " + sessionId;
+      await loadSuggestions();
+    }
+
+    async function loadSuggestions() {
+      const url = BASE + "/api/chat/suggest" + (sessionId ? "/" + sessionId : "") + "?limit=5";
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      suggestionsEl.innerHTML = "";
+      (data.suggestions || []).forEach((q) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = q;
+        btn.addEventListener("click", () => {
+          chatInput.value = q;
+          chatForm.dispatchEvent(new Event("submit"));
+        });
+        suggestionsEl.appendChild(btn);
+      });
+    }
+
+    chatForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const message = chatInput.value.trim();
+      if (!message) return;
+      try {
+        await ensureSession();
+        appendChat("user", message);
+        chatInput.value = "";
+        showThinkingBubble();
+        const res = await fetch(BASE + "/api/chat/message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, message }),
+        });
+        const data = await res.json();
+        removeThinkingBubble();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        appendChat("assistant", data.reply);
+        await loadSuggestions();
+      } catch (err) {
+        removeThinkingBubble();
+        chatStatus.textContent = "Error: " + err.message;
+        chatStatus.classList.add("error");
+      }
+    });
+
+    // FAQ list + add
+    async function loadFaq() {
+      const res = await fetch(BASE + "/api/faq");
+      const list = await res.json();
+      const el = document.getElementById("faq-list");
+      el.innerHTML = list.length
+        ? list.map((e) => {
+            const short = e.answer.length > 120 ? e.answer.slice(0, 120) + "…" : e.answer;
+            return `<div><strong>${e.question}</strong><br/><span style="color:var(--muted)">${short}</span></div>`;
+          }).join("<br/>")
+        : "<p class='status'>No FAQ entries.</p>";
+    }
+
+    document.getElementById("faq-add").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const question = document.getElementById("faq-question").value.trim();
+      const answer = document.getElementById("faq-answer").value.trim();
+      try {
+        const res = await fetch(BASE + "/api/faq", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question, answer }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        document.getElementById("faq-question").value = "";
+        document.getElementById("faq-answer").value = "";
+        await loadFaq();
+      } catch (err) {
+        alert("Error: " + err.message);
+      }
+    });
+
+    document.getElementById("panel-faq").classList.contains("active") || loadFaq();
+    document.querySelector('.tabs button[data-panel="faq"]').addEventListener("click", loadFaq);
+  </script>
+</body>
+</html>

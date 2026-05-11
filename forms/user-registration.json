@@ -1,0 +1,75 @@
+{
+  "id": "user-registration",
+  "name": "User Registration",
+  "submitUrl": "http://localhost:3000/api/register",
+  "submitMethod": "POST",
+  "triggerPhrases": [
+    "register",
+    "i would like to register",
+    "sign up",
+    "signup",
+    "create account",
+    "i want to register",
+    "yes",
+    "yes please",
+    "नोंदणी",
+    "मला नोंदणी करायची आहे",
+    "नोंदणी करा",
+    "साइन अप",
+    "खाते तयार करा",
+    "हो",
+    "होय",
+    "पंजीकरण",
+    "मुझे पंजीकरण करना है",
+    "रजिस्टर",
+    "साइन अप करें",
+    "खाता बनाएं",
+    "हां",
+    "जी हां"
+  ],
+  "offerQuestions": [
+    "Would you like to register?",
+    "Do you want to register?",
+    "Do you want to create an account?",
+    "Do you want to sign up?",
+    "Do you want to sign in?",
+    "Do you want to login?",
+    "तुम्हाला नोंदणी करायची आहे का?",
+    "क्या आप पंजीकरण करना चाहते हैं?"
+  ],
+  "fields": [
+    {
+      "key": "fullName",
+      "label": "What is your full name?",
+      "label_mr": "तुमचे पूर्ण नाव काय आहे?",
+      "label_hi": "आपका पूरा नाम क्या है?",
+      "type": "text",
+      "required": true,
+      "validation": { "minLength": 2, "maxLength": 100 }
+    },
+    {
+      "key": "email",
+      "label": "What is your email address?",
+      "label_mr": "तुमचा ईमेल पत्ता काय आहे?",
+      "label_hi": "आपका ईमेल पता क्या है?",
+      "type": "email",
+      "required": true
+    },
+    {
+      "key": "phone",
+      "label": "What is your phone number? (optional)",
+      "label_mr": "तुमचा फोन नंबर काय आहे? (ऐच्छिक)",
+      "label_hi": "आपका फोन नंबर क्या है? (वैकल्पिक)",
+      "type": "tel",
+      "required": false
+    },
+    {
+      "key": "dateOfBirth",
+      "label": "What is your date of birth?",
+      "label_mr": "तुमची जन्मतारीख काय आहे?",
+      "label_hi": "आपकी जन्म तिथि क्या है?",
+      "type": "date",
+      "required": true
+    }
+  ]
+}

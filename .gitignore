@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables (contains API keys!)
+.env
+
+# Python virtual environment
+MyBot/myenv/
+__pycache__/
+*.pyc
+
+# OS-generated files
+__MACOSX/
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# Large generated files
+vector_store.json
+
+# Logs
+*.log
+npm-debug.log*
