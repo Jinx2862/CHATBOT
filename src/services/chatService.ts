@@ -18,6 +18,7 @@ import { ChatSession, ChatMessage } from "../types";
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:3b";
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY ?? "";
+const MAITRI_OFFICIAL_URL = "https://maitri.maharashtra.gov.in/";
 
 /** Detect if user message is likely Marathi or Hindi (Devanagari script). */
 function detectLanguage(text: string): "mr" | "hi" | "en" {
@@ -44,6 +45,34 @@ export function getOutOfFaqReply(userMessage: string): string {
 /** Kept for backward compat. */
 export const OUT_OF_FAQ_REPLY =
   "I can only answer questions based on our FAQ. I don't have an answer to that. Please check the FAQ list or ask something related to the topics we cover.";
+
+/** Detect if a Gemini reply is an out-of-FAQ refusal (in any language). */
+function isOutOfFaqReply(reply: string): boolean {
+  const lower = reply.trim().toLowerCase();
+  const patterns = [
+    "i can only answer questions from the provided faq",
+    "i can only answer questions based on our faq",
+    "not available in the faq",
+    "not found in the faq",
+    "faq में उपलब्ध नहीं",
+    "faq मध्ये उपलब्ध नाही",
+    "मुझे खेद है, इस प्रश्न का उत्तर faq में उपलब्ध नहीं है",
+    "मला माफ करा, या प्रश्नाचे उत्तर faq मध्ये उपलब्ध नाही",
+    "i don't have an answer to that",
+  ];
+  return patterns.some(p => lower.includes(p));
+}
+
+/** Get the "for more information" footer in the user's language. */
+function getMoreInfoFooter(lang: "en" | "hi" | "mr"): string {
+  if (lang === "mr") {
+    return `\n\nअधिक माहितीसाठी MAITRI च्या अधिकृत वेबसाइटला भेट द्या (${MAITRI_OFFICIAL_URL})`;
+  }
+  if (lang === "hi") {
+    return `\n\nअधिक जानकारी के लिए MAITRI की आधिकारिक वेबसाइट पर जाएँ (${MAITRI_OFFICIAL_URL})`;
+  }
+  return `\n\nFor more information visit official website of MAITRI(${MAITRI_OFFICIAL_URL})`;
+}
 
 /** Escape HTML entities so output is safe for innerHTML. */
 function escapeHtml(s: string): string {
@@ -416,6 +445,83 @@ Maitri (reply in ${langName} only):`;
 }
 
 /**
+ * RAG fallback: When the user's question is NOT in the FAQ, search the
+ * vector store (scraped from the MAITRI portal) and answer using that context.
+ * Appends source attribution and a link to the official website.
+ */
+async function getGeminiRagReply(
+  userQuestion: string,
+  vectorContext: string,
+  history: ChatMessage[],
+  userLang: "en" | "hi" | "mr"
+): Promise<string | null> {
+  if (!GOOGLE_API_KEY) return null;
+  if (!vectorContext || vectorContext.includes("(Vector Database not found")) return null;
+
+  try {
+    const langName = userLang === "hi" ? "Hindi (हिंदी)" : userLang === "mr" ? "Marathi (मराठी)" : "English";
+
+    const sourceNote =
+      userLang === "hi"
+        ? "स्रोत: MAITRI आधिकारिक वेबसाइट (maitri.maharashtra.gov.in)"
+        : userLang === "mr"
+        ? "स्रोत: MAITRI अधिकृत वेबसाइट (maitri.maharashtra.gov.in)"
+        : "Source: MAITRI Official Website (maitri.maharashtra.gov.in)";
+
+    const historyText = history.slice(-4)
+      .map(m => `${m.role === "user" ? "User" : "Maitri"}: ${m.content}`)
+      .join("\n");
+
+    const prompt = `You are Maitri, a helpful assistant for Maharashtra's investment facilitation. You MUST reply in ${langName} ONLY.
+
+=== LANGUAGE DIRECTIVE (HIGHEST PRIORITY) ===
+YOUR RESPONSE MUST BE WRITTEN ENTIRELY IN ${langName.toUpperCase()}.
+${userLang === "hi" ? `- Use "आप" as honorific (never "आपलोगों" or "तुम")
+- Use female verb forms: "सकती हूँ" not "सकता हूँ"` : ""}
+${userLang === "mr" ? `- Use "आपण" as honorific
+- Use female verb forms: "सांगू शकते", "करू शकते"` : ""}
+
+=== CONTENT RULES ===
+- Answer the user's question using ONLY the website content provided below.
+- If the content below does not contain enough information to answer, say so honestly.
+- Be concise and helpful. Use markdown bullet lists when appropriate.
+- Copy all URLs exactly as they appear in the content.
+- At the end of your answer, on a new line, add: "${sourceNote}"
+
+=== TERMS TO NEVER TRANSLATE ===
+MAITRI, MAITRI Portal, MIDC, Maharashtra, FCI, MOU, NRI, FDI, PSI, DIC, GM, INR, G2B
+
+WEBSITE CONTENT (from maitri.maharashtra.gov.in):
+${vectorContext}
+
+${historyText ? `RECENT CONVERSATION:\n${historyText}\n\n` : ""}User: ${userQuestion}
+Maitri (reply in ${langName} only):`;
+
+    const cacheKey = `rag::${getCacheKey(userLang, userQuestion, history)}`;
+    if (geminiResponseCache.has(cacheKey)) {
+      console.log(`[Gemini RAG] Cache hit for "${userQuestion.slice(0, 40)}..." (${userLang})`);
+      return geminiResponseCache.get(cacheKey)!;
+    }
+
+    const answer = await callGeminiWithRetry(prompt);
+    if (answer) {
+      console.log(`[Gemini RAG] Answered from portal content in ${userLang} ✓`);
+      if (geminiResponseCache.size >= CACHE_MAX) {
+        const firstKey = geminiResponseCache.keys().next().value;
+        if (firstKey) geminiResponseCache.delete(firstKey);
+      }
+      geminiResponseCache.set(cacheKey, answer);
+      scheduleFlushCache();
+      return answer;
+    }
+    return null;
+  } catch (err) {
+    console.warn("[Gemini RAG] Failed:", err);
+    return null;
+  }
+}
+
+/**
  * Translate English text to Hindi or Marathi using Gemini Flash.
  * Falls back to MyMemory (free, no key) if Gemini is unavailable.
  * Returns the original English text if both fail.
@@ -727,17 +833,8 @@ export async function sendMessage(
   // Load FAQ text from cache (no disk read on repeat requests)
   const faqText = getCachedFaqText();
 
-  // When Gemini is available, skip the vector search entirely —
-  // Gemini reads the full FAQ directly so the embedding lookup is unnecessary.
-  // When Gemini is NOT available we still run the vector search for Ollama.
+  // Both Gemini and Ollama should initially answer using ONLY the FAQ text.
   let combinedContext = faqText || "(FAQ is empty.)";
-  if (!GOOGLE_API_KEY) {
-    // Ollama fallback path: augment with vector context
-    const vectorContext = await getVectorContext(userContent);
-    if (vectorContext && !vectorContext.includes("(Vector Database not found")) {
-      combinedContext += "\n\n=== Portal Information (Supplementary) ===\n" + vectorContext;
-    }
-  }
 
   // Detect the user's language
   const userLangGuess = (langHint as "mr" | "hi" | "en") || detectLanguage(userContent);
@@ -745,6 +842,18 @@ export async function sendMessage(
   // Single Gemini call: answers in the user's language directly (answer + translate in one shot)
   // Fallback: two-step Ollama path (answer English → no translation for now)
   let finalReply = await getGeminiReply(userContent, combinedContext, session.messages.slice(0, -1), userLangGuess);
+
+  // ── RAG Fallback: if Gemini says "not in FAQ", search the portal vector store ──
+  if (finalReply && isOutOfFaqReply(finalReply)) {
+    console.log(`[RAG Fallback] FAQ reply rejected, searching portal vector store...`);
+    const vectorContext = await getVectorContext(userContent);
+    const ragReply = await getGeminiRagReply(userContent, vectorContext, session.messages.slice(0, -1), userLangGuess);
+    if (ragReply) {
+      finalReply = ragReply + getMoreInfoFooter(userLangGuess);
+      console.log(`[RAG Fallback] Answered from portal content ✓`);
+    }
+    // If RAG also fails, keep the original out-of-FAQ reply
+  }
 
   if (!finalReply) {
     console.warn("[Answer] Falling back to Ollama (qwen2.5:3b)");
@@ -756,6 +865,28 @@ export async function sendMessage(
     const messages = buildMessages(session.messages.slice(0, -1), userContent, combinedContext, userLangGuess as "mr" | "hi" | "en");
     const response = await model.invoke(messages);
     finalReply = typeof response.content === "string" ? response.content : String(response.content);
+
+    // Ollama may also refuse out-of-FAQ — try RAG fallback with portal content
+    if (isOutOfFaqReply(finalReply) && vectorContext && !vectorContext.includes("(Vector Database not found")) {
+      console.log(`[RAG Fallback/Ollama] FAQ reply rejected, using portal content...`);
+      // Re-ask Ollama with portal-only context (no FAQ constraint)
+      const ragPrompt = `You are Maitri, a helpful assistant for Maharashtra's investment facilitation.
+Answer the user's question using the website content below. Be concise and helpful.
+At the end of your answer, add on a new line: "Source: MAITRI Official Website (maitri.maharashtra.gov.in)"
+
+WEBSITE CONTENT:
+${vectorContext}
+
+User: ${userContent}
+Maitri:`;
+      const ragMessages = [new SystemMessage(ragPrompt), new HumanMessage(userContent)];
+      const ragResponse = await model.invoke(ragMessages);
+      const ragText = typeof ragResponse.content === "string" ? ragResponse.content : String(ragResponse.content);
+      if (ragText && !isOutOfFaqReply(ragText)) {
+        finalReply = ragText + getMoreInfoFooter(userLangGuess);
+        console.log(`[RAG Fallback/Ollama] Answered from portal content ✓`);
+      }
+    }
   }
 
   appendMessage(sessionId, "assistant", finalReply);
