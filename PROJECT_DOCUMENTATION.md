@@ -102,7 +102,7 @@ MAITRI_BOT/
 | **Temperature**  | 0.1 (low creativity, high accuracy)                                            |
 | **Key Features** | Rate-limit retry (429 → wait 2s → retry), response caching (up to 500 entries) |
 
-**What it does:** Receives the full FAQ text + user question + language directive, then produces an answer directly in the user's language (Marathi/Hindi/English). This eliminates the need for a separate translation step.
+**What it does:** Receives the full FAQ text + user question + language directive, then produces an answer directly in the user's language (Marathi/Hindi/English). This eliminates the need for a separate translation step. If the answer is **not** in the FAQ, Gemini returns a refusal message which is caught by `isOutOfFaqReply()`, triggering a second call (`getGeminiRagReply()`) with the portal's vector content instead.
 
 ### 2.2 Ollama + Qwen 2.5:3b (Local Fallback LLM)
 
@@ -126,8 +126,8 @@ MAITRI_BOT/
 | **Library** | LangChain `OllamaEmbeddings` |
 
 **What it does:**
-- **Ingestion:** Scrapes the MAITRI portal website, chunks the text, generates embeddings, and saves to `vector_store.json`
-- **Retrieval:** When Ollama fallback is active, embeds the user's query and finds the top-3 most similar chunks using cosine similarity
+- **Ingestion:** Scrapes the MAITRI portal website, chunks the text, generates embeddings, and saves to `vector_store.json` (44 docs)
+- **Retrieval (RAG Fallback):** When a question is not in the FAQ, the bot embeds the user's query and finds the top-3 most similar portal chunks using cosine similarity. These chunks are used as context for the RAG reply. This runs for **both** Gemini and Ollama paths.
 
 ### 2.4 Sarvam AI — Saaras v3 (Speech-to-Text)
 
@@ -172,20 +172,35 @@ MAITRI_BOT/
 User sends a message
        │
        ▼
-Is GOOGLE_API_KEY set?
+ ── TIER 1: FAQ ──────────────────────────────────────────────────────
+ Is GOOGLE_API_KEY set?
        │
-  YES ─┤── ► Gemini 2.0 Flash (single call: answer + translate)
+  YES ─┤── ► Gemini 2.0 Flash: answer from FAQ
        │         │
-       │    Returns 429?
+       │    Answer found in FAQ? ─── YES ──► Return answer ✓
+       │         │
+       │         NO (refusal detected by isOutOfFaqReply)
+       │         │
+       │ ── TIER 2: RAG FALLBACK ─────────────────────────────────────
+       │         └──► getVectorContext() → top-3 portal chunks
+       │               └──► getGeminiRagReply() → portal-based answer
+       │                     + source attribution
+       │                     + "For more information visit MAITRI..."
+       │
+       │    Returns 429 (rate limited)?
        │         │
        │    YES ─┤── Retry after 2s
        │         │     │
-       │         │  Still 429? → Fall to Ollama
+       │         │  Still 429?
+       │         │     │
+  NO ──┼── ► Ollama qwen2.5:3b (Tier 1 FAQ, local)
        │         │
-       │    Returns answer ✓
-       │
-  NO ──┤── ► Ollama qwen2.5:3b + BGE-M3 vector search
-              (local, slower, uses vector_store.json)
+       │    Answer found? ─── YES ──► Return answer ✓
+       │         │
+       │         NO (refusal detected)
+       │ ── TIER 2 (Ollama RAG) ──────────────────────────────────────
+       └──────────► Vector search → re-ask Ollama with portal content
+                     + "For more information visit MAITRI..."
 ```
 
 ---
@@ -300,25 +315,6 @@ Step 2: Start Python server
 ### 4.2 Text Chat Flow (Main FAQ Chatbot)
 
 ```
-User types: "What is MAITRI?"
-           │
-           ▼
-  ┌─ Browser (index.html) ─────────────────────────────────────┐
-  │  1. User clicks FAB button → opens chat popup              │
-  │  2. ensureSession() → POST /api/chat/init                  │
-  │     Server returns { sessionId: "session-xxx-123" }         │
-  │  3. User types message, hits Send                          │
-  │  4. POST /api/chat/message { sessionId, message }          │
-  └────────────────────────────────────────────────────────────┘
-           │
-           ▼
-  ┌─ chatRoutes.ts ────────────────────────────────────────────┐
-  │  Receives POST /api/chat/message                           │
-  │  Validates sessionId and message                           │
-  │  Calls: sendMessage(sessionId, message, language)          │
-  └────────────────────────────────────────────────────────────┘
-           │
-           ▼
   ┌─ chatService.ts → sendMessage() ───────────────────────────┐
   │                                                             │
   │  Step 1: Append user message to session history             │
@@ -458,9 +454,15 @@ Run: npx ts-node src/scripts/ingest.ts
   └─────────────────────────────────────────────────────────────┘
            │
            ▼
-  vector_store.json (~600KB) is used at runtime by
-  chatService.ts → getVectorContext() for semantic search
-  (only when Ollama fallback is active, not with Gemini)
+  vector_store.json (~600KB, 44 docs) is used at runtime by
+  chatService.ts → getVectorContext() for semantic search.
+
+  This is now the RAG FALLBACK source — consulted automatically
+  whenever a user question cannot be answered from FAQ.md.
+  Both Gemini and Ollama paths use it. Answers from this source
+  are attributed to the official MAITRI website and include
+  the footer: "For more information visit official website
+  of MAITRI (https://maitri.maharashtra.gov.in/)"
 ```
 
 ### 4.6 Complete System Architecture
@@ -486,21 +488,31 @@ Run: npx ts-node src/scripts/ingest.ts
 │                     │  HTTP  │                          │
 │ ┌─────────────────┐ │        │ ┌──────────────────────┐ │
 │ │  chatService.ts │ │        │ │  routes/voice.py     │ │
-│ │  (FAQ + LLM)    │ │        │ │  (Pipeline orchestr.)│ │
+│ │ (FAQ+RAG+LLM)  │ │        │ │  (Pipeline orchestr.)│ │
 │ └────────┬────────┘ │        │ └──────┬───────────────┘ │
 │          │          │        │        │                  │
-│    ┌─────┴──────┐   │        │  ┌─────┴───────────┐     │
-│    │ Gemini API │   │        │  │ Sarvam AI Cloud  │     │
-│    │ (primary)  │   │        │  │  STT (Saaras v3) │     │
-│    └────────────┘   │        │  │  TTS (Bulbul v3) │     │
-│    ┌────────────┐   │        │  └──────────────────┘     │
-│    │ Ollama     │   │        │                          │
-│    │ (fallback) │   │        │ ┌──────────────────────┐ │
-│    │ qwen2.5:3b │   │        │ │ chatbot_interface.py │ │
-│    │ bge-m3     │   │        │ │ (calls Node.js API)  │ │
-│    └────────────┘   │        │ └──────────────────────┘ │
-│                     │        │                          │
-│ ┌─────────────────┐ │        └──────────────────────────┘
+│  ┌───────┴──────┐   │        │  ┌─────┴───────────┐     │
+│  │ TIER 1: FAQ  │   │        │  │ Sarvam AI Cloud  │     │
+│  │ Gemini API   │   │        │  │  STT (Saaras v3) │     │
+│  │ (primary)    │   │        │  │  TTS (Bulbul v3) │     │
+│  └──────┬───────┘   │        │  └──────────────────┘     │
+│         │ refusal?  │        │                          │
+│  ┌──────▼───────┐   │        │ ┌──────────────────────┐ │
+│  │ TIER 2: RAG  │   │        │ │ chatbot_interface.py │ │
+│  │vector_store  │   │        │ │ (calls Node.js API)  │ │
+│  │.json search  │   │        │ └──────────────────────┘ │
+│  │+Gemini RAG   │   │        └──────────────────────────┘
+│  │+MAITRI URL   │   │
+│  └──────┬───────┘   │
+│         │ Gemini 429│
+│  ┌──────▼───────┐   │
+│  │ TIER 3:      │   │
+│  │ Ollama local │   │
+│  │ qwen2.5:3b   │   │
+│  │ bge-m3       │   │
+│  └──────────────┘   │
+│                     │
+│ ┌─────────────────┐ │
 │ │ FAQ.md          │ │
 │ │ vector_store.json│ │
 │ │ forms/*.json    │ │
@@ -554,4 +566,4 @@ Run: npx ts-node src/scripts/ingest.ts
 
 ---
 
-*Document generated on 2026-04-24. Reflects the current state of the MAITRI_BOT codebase.*
+*Document last updated: 2026-05-12. Reflects the current state of the MAITRI_BOT codebase including RAG fallback implementation.*
